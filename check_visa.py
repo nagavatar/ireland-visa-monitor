@@ -1,12 +1,17 @@
 import requests
-import re
 
 url = "https://www.ireland.ie/en/india/newdelhi/services/visas/processing-times-and-decisions/"
 
 html = requests.get(url, timeout=30).text
 
-for m in re.finditer(r"New Delhi", html, re.IGNORECASE):
-    start = max(0, m.start() - 500)
-    end = min(len(html), m.start() + 3000)
-    print(html[start:end])
-    print("\n" + "=" * 100 + "\n")
+print("NEW DELHI COUNT:", html.lower().count("new delhi"))
+print("ODS COUNT:", html.lower().count(".ods"))
+
+lines = html.splitlines()
+
+for i, line in enumerate(lines):
+    if "ods" in line.lower():
+        print("\nLINE", i)
+        print(line)
+
+raise Exception("DEBUG COMPLETE")
