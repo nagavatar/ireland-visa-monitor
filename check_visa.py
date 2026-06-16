@@ -29,10 +29,21 @@ is_weekend = today.weekday() >= 5  # 5=Saturday, 6=Sunday
 
 # ---------------- STATE ----------------
 def load_state():
-    if not os.path.exists(STATE_FILE):
+    try:
+        if not os.path.exists(STATE_FILE):
+            return {"notified": False}
+
+        with open(STATE_FILE, "r") as f:
+            content = f.read().strip()
+
+        if not content:
+            return {"notified": False}
+
+        return json.loads(content)
+
+    except Exception as e:
+        print("State load failed, resetting:", str(e))
         return {"notified": False}
-    with open(STATE_FILE, "r") as f:
-        return json.load(f)
 
 
 def save_state(state):
