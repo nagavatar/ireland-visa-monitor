@@ -60,22 +60,54 @@ def send_email(status, row_text):
         server.send_message(msg)
 
 
-html = requests.get(PAGE_URL, timeout=30).text
+headers = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/125.0 Safari/537.36"
+    )
+}
+
+html = requests.get(
+    PAGE_URL,
+    headers=headers,
+    timeout=30
+).text
 
 soup = BeautifulSoup(html, "html.parser")
-
 ods_url = None
 
+print("Searching for ODS link...")
+
 for a in soup.find_all("a", href=True):
-    if a["href"].endswith(".ods"):
-        ods_url = urljoin(PAGE_URL, a["href"])
+
+    href = a["href"]
+    text = a.get_text(" ", strip=True)
+
+    if ".ods" in href.lower():
+        ods_url = urljoin(PAGE_URL, href)
+        print("Found ODS:", ods_url)
         break
 
 if not ods_url:
+
+    print("\nAvailable links on page:\n")
+
+    for a in soup.find_all("a", href=True):
+        print(
+            f"TEXT=[{a.get_text(' ', strip=True)}] "
+            f"HREF=[{a['href']}]"
+        )
+
     raise Exception("ODS file not found")
 
 with open("visa.ods", "wb") as f:
-    f.write(requests.get(ods_url, timeout=30).content)
+    f.write(requests.get(
+    ods_url,
+    headers=headers,
+    timeout=30
+).content)
 
 df = pd.read_excel("visa.ods", engine="odf")
 
