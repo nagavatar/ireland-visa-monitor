@@ -7,6 +7,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from urllib.parse import urljoin
+from bs4 import BeautifulSoup
 
 
 # ---------------- CONFIG ----------------
@@ -14,16 +16,14 @@ TARGET_ID = os.environ["TARGET_ID"]
 EMAIL_USER = os.environ["EMAIL_USER"]
 EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
 
-STATE_FILE = "state.json"
-BASE_URL = "https://www.ireland.ie/4811/"
+PAGE_URL = "https://www.ireland.ie/en/india/newdelhi/services/visas/processing-times-and-decisions/"
+BASE = "https://www.ireland.ie"
 
-MAX_LOOKBACK_DAYS = 7
-HISTORY_DAYS = 90
+STATE_FILE = "state.json"
 
 
 # ---------------- TIME ----------------
 now = datetime.now(timezone.utc)
-is_weekend = now.weekday() >= 5
 
 
 # ---------------- STATE ----------------
@@ -41,7 +41,7 @@ def load_state():
         return json.loads(content)
 
     except Exception as e:
-        print("State load failed, resetting:", str(e))
+        print("State load failed:", e)
         return {"notified": False}
 
 
@@ -65,101 +65,54 @@ def send_email(subject, body):
         server.send_message(msg)
 
 
-# ---------------- FILE CHECK ----------------
-def check_file(url):
-    try:
-        r = requests.head(url, timeout=10)
-        return r.status_code == 200
-    except:
-        return False
+# ---------------- GET ODS FROM PAGE ----------------
+def get_ods_from_page():
+    html = requests.get(PAGE_URL, timeout=30).text
+    soup = BeautifulSoup(html, "html.parser")
+
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+
+        if "NDVO_Visa_Decisions" in href and href.endswith(".ods"):
+            return urljoin(BASE, href)
+
+    return None
 
 
-# ---------------- FIND LATEST FILE ----------------
-def find_latest_ods():
-    for i in range(MAX_LOOKBACK_DAYS):
-        date = now - timedelta(days=i)
-        date_str = date.strftime("%Y%m%d")
-
-        url = f"{BASE_URL}{date_str}_NDVO_Visa_Decisions.ods"
-
-        if check_file(url):
-            return url, date_str
-
-    return None, None
-
-
-# ---------------- HISTORY SCAN (LAST 3 MONTHS) ----------------
-def scan_history():
-    print("\n===== VISA FILE HISTORY (LAST 90 DAYS) =====\n")
-
-    available = []
-    missing = []
-
-    for i in range(HISTORY_DAYS):
-        date = now - timedelta(days=i)
-        date_str = date.strftime("%Y%m%d")
-
-        url = f"{BASE_URL}{date_str}_NDVO_Visa_Decisions.ods"
-
-        if check_file(url):
-            available.append(date_str)
-            print(f"AVAILABLE   {date_str}")
-        else:
-            missing.append(date_str)
-            print(f"MISSING     {date_str}")
-
-    print("\n===== SUMMARY =====")
-    print(f"Available: {len(available)}")
-    print(f"Missing:   {len(missing)}\n")
-
-    return available, missing
-
-
-# ---------------- MAIN ----------------
+# ---------------- MAIN LOGIC ----------------
 state = load_state()
 
-# 1. Scan history (always runs)
-available, missing = scan_history()
+# try today first (from page)
+ods_url = get_ods_from_page()
 
-# 2. Find latest usable file
-ODS_URL, file_date = find_latest_ods()
+# if not found, try yesterday page state (same page usually still shows latest, so fallback is same)
+if not ods_url:
+    send_email(
+        "Visa Update - File Not Found",
+        f"""
+        <h2>No Visa File Found</h2>
+        <p>Could not locate ODS file on page.</p>
+        <p><b>Date:</b> {now.date()}</p>
+        """
+    )
+    raise SystemExit("No ODS file found")
 
-# ---------------- NO FILE FOUND ----------------
-if not ODS_URL:
 
-    if is_weekend:
-        send_email(
-            "Visa Update - Weekend Delay (Expected)",
-            f"""
-            <h2>No Visa File Published</h2>
-            <p>Weekend detected — no updates expected.</p>
-            <p><b>Date:</b> {now.date()}</p>
-            """
-        )
-    else:
-        send_email(
-            "Visa Update - No File Found",
-            f"""
-            <h2>No Visa File Found</h2>
-            <p>Checked last {MAX_LOOKBACK_DAYS} days.</p>
-            <p><b>Date:</b> {now.date()}</p>
-            """
-        )
-
-    raise SystemExit("No file found")
+print("Using file:", ods_url)
 
 
 # ---------------- DOWNLOAD ----------------
-response = requests.get(ODS_URL, timeout=30)
+response = requests.get(ods_url, timeout=30)
 response.raise_for_status()
 
 with open("visa.ods", "wb") as f:
     f.write(response.content)
 
+
 df = pd.read_excel("visa.ods", engine="odf")
 
 
-# ---------------- SEARCH TARGET ----------------
+# ---------------- SEARCH ----------------
 for _, row in df.iterrows():
 
     text = " ".join(str(x) for x in row.values)
@@ -183,7 +136,6 @@ for _, row in df.iterrows():
                 <h2>Visa Decision Found</h2>
                 <p><b>Application:</b> {TARGET_ID}</p>
                 <p><b>Status:</b> {status}</p>
-                <p><b>File Date:</b> {file_date}</p>
                 <pre>{text}</pre>
                 """
             )
