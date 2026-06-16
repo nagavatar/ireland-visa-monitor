@@ -1,32 +1,12 @@
 import requests
-import os
+import re
 
-PAGE_URL = (
-    "https://www.ireland.ie/en/india/newdelhi/services/"
-    "visas/processing-times-and-decisions/"
-)
+url = "https://www.ireland.ie/en/india/newdelhi/services/visas/processing-times-and-decisions/"
 
-headers = {
-    "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) "
-        "AppleWebKit/537.36 "
-        "(KHTML, like Gecko) "
-        "Chrome/125.0 Safari/537.36"
-    )
-}
+html = requests.get(url, timeout=30).text
 
-response = requests.get(
-    PAGE_URL,
-    headers=headers,
-    timeout=30,
-    allow_redirects=True
-)
-
-print("STATUS CODE:", response.status_code)
-print("FINAL URL:", response.url)
-print("PAGE LENGTH:", len(response.text))
-
-print("\n===== FIRST 5000 CHARACTERS =====\n")
-print(response.text[:5000])
-
-raise Exception("STOP FOR DEBUG")
+for m in re.finditer(r"New Delhi", html, re.IGNORECASE):
+    start = max(0, m.start() - 500)
+    end = min(len(html), m.start() + 3000)
+    print(html[start:end])
+    print("\n" + "=" * 100 + "\n")
