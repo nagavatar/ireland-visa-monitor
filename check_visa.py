@@ -33,8 +33,8 @@ GMAIL_PORT = 587
 
 # Status keywords to search for in the ODS file
 STATUS_KEYWORDS = {
-    "Granted": ["granted", "visa granted"],
-    "Refused": ["refused", "visa refused", "rejected"],
+    "Granted": ["granted", "visa granted", "Approved"],
+    "Refused": ["Refused", "visa refused", "rejected"],
     "Found": ["decision", "found", "processed"]
 }
 
