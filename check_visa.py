@@ -76,33 +76,15 @@ html = requests.get(
 ).text
 
 soup = BeautifulSoup(html, "html.parser")
-ods_url = None
 
-print("Searching for ODS link...")
+print("PAGE LENGTH:", len(html))
+print("FIRST 5000 CHARS:")
+print(html[:5000])
 
-for a in soup.find_all("a", href=True):
+with open("page.html", "w", encoding="utf-8") as f:
+    f.write(html)
 
-    href = a["href"]
-    text = a.get_text(" ", strip=True)
-
-    if ".ods" in href.lower():
-        ods_url = urljoin(PAGE_URL, href)
-        print("Found ODS:", ods_url)
-        break
-
-if not ods_url:
-
-    print("\nAvailable links on page:\n")
-
-    for a in soup.find_all("a", href=True):
-        print(
-            f"TEXT=[{a.get_text(' ', strip=True)}] "
-            f"HREF=[{a['href']}]"
-        )
-
-    raise Exception("ODS file not found")
-
-with open("visa.ods", "wb") as f:
+raise Exception("STOP FOR DEBUG")with open("visa.ods", "wb") as f:
     f.write(requests.get(
     ods_url,
     headers=headers,
