@@ -4,18 +4,27 @@ import pandas as pd
 import smtplib
 import os
 
-from bs4 import BeautifulSoup
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from urllib.parse import urljoin
 
 # ---------------- CONFIG ----------------
 TARGET_ID = os.environ["TARGET_ID"]
 EMAIL_USER = os.environ["EMAIL_USER"]
 EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
 
-PAGE_URL = "https://www.ireland.ie/en/india/newdelhi/services/visas/processing-times-and-decisions/"
 STATE_FILE = "state.json"
+
+BASE_URL = "https://www.ireland.ie/4811/"
+
+# ---------------- DATE LOGIC ----------------
+today = datetime.utcnow()
+
+date_str = today.strftime("%Y%m%d")
+
+ODS_URL = f"{BASE_URL}{date_str}_NDVO_Visa_Decisions.ods"
+
+is_weekend = today.weekday() >= 5  # 5=Saturday, 6=Sunday
 
 
 # ---------------- STATE ----------------
@@ -32,60 +41,70 @@ def save_state(state):
 
 
 # ---------------- EMAIL ----------------
-def send_email(status, row_text):
+def send_email(subject, body):
 
     msg = MIMEMultipart()
-    msg["Subject"] = f"Ireland Visa Update - {status}"
+    msg["Subject"] = subject
     msg["From"] = EMAIL_USER
     msg["To"] = EMAIL_USER
 
-    html = f"""
-    <html>
-    <body>
-        <h2>Ireland Visa Decision Found</h2>
-        <p><b>Application:</b> {TARGET_ID}</p>
-        <p><b>Status:</b> {status}</p>
-        <pre>{row_text}</pre>
-    </body>
-    </html>
-    """
-
-    msg.attach(MIMEText(html, "html"))
+    msg.attach(MIMEText(body, "html"))
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(EMAIL_USER, EMAIL_PASSWORD)
         server.send_message(msg)
 
 
-# ---------------- FETCH PAGE ----------------
-html = requests.get(PAGE_URL, timeout=30).text
-soup = BeautifulSoup(html, "html.parser")
+# ---------------- CHECK FILE ----------------
+def check_ods_exists(url):
+    try:
+        r = requests.head(url, timeout=20)
+        return r.status_code == 200
+    except:
+        return False
 
-# ✅ Direct + safe extraction (based on known structure)
-ods_url = None
 
-for a in soup.select("a[href]"):
-    href = a["href"]
-    if "Visa_Decisions" in href and href.endswith(".ods"):
-        ods_url = urljoin(PAGE_URL, href)
-        break
+# ---------------- MAIN LOGIC ----------------
+state = load_state()
 
-if not ods_url:
-    raise Exception("ODS file not found")
+if not check_ods_exists(ODS_URL):
 
-# ---------------- DOWNLOAD ODS ----------------
-ods_data = requests.get(ods_url, timeout=30).content
+    if is_weekend:
+        send_email(
+            "Visa Update - Weekend Delay (Expected)",
+            f"""
+            <h2>No Visa File Published</h2>
+            <p><b>Date:</b> {today.date()}</p>
+            <p><b>Reason:</b> Weekend (Saturday/Sunday) — no updates expected.</p>
+            <p><b>Checked URL:</b> {ODS_URL}</p>
+            """
+        )
+    else:
+        send_email(
+            "Visa Update - File Not Found",
+            f"""
+            <h2>No Visa File Found</h2>
+            <p><b>Date:</b> {today.date()}</p>
+            <p>The expected ODS file was not found.</p>
+            <p><b>Checked URL:</b> {ODS_URL}</p>
+            """
+        )
+
+    raise SystemExit("No file available today")
+
+
+# ---------------- DOWNLOAD FILE ----------------
+ods_data = requests.get(ODS_URL, timeout=30).content
 
 with open("visa.ods", "wb") as f:
     f.write(ods_data)
 
-# ---------------- READ ODS ----------------
 df = pd.read_excel("visa.ods", engine="odf")
 
-state = load_state()
 
-# ---------------- SEARCH ----------------
+# ---------------- SEARCH TARGET ----------------
 for _, row in df.iterrows():
+
     text = " ".join(str(x) for x in row.values)
 
     if TARGET_ID in text:
@@ -101,7 +120,15 @@ for _, row in df.iterrows():
             else:
                 status = "FOUND"
 
-            send_email(status, text)
+            send_email(
+                f"Ireland Visa Update - {status}",
+                f"""
+                <h2>Visa Decision Found</h2>
+                <p><b>Application:</b> {TARGET_ID}</p>
+                <p><b>Status:</b> {status}</p>
+                <pre>{text}</pre>
+                """
+            )
 
             state["notified"] = True
             save_state(state)
